@@ -5,7 +5,7 @@ Welcome to my professional data portfolio. This repository showcases projects in
 ## Projects
 
 ### 1. Power BI Dashboard Mockup
-**Context:** Generic refunds data dashboard created as a portfolio mockup.  
+**Context:** Generic refunds data dashboard created as a portfolio mockup. Inspired by a real project.
 **Objective:** Demonstrate dashboard design, data visualization, and Power BI skills.  
 **Tools Used:** Power BI, Excel, DAX  
 **Screenshots:**  
