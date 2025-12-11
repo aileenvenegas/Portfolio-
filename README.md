@@ -10,5 +10,5 @@ Welcome to my professional data portfolio. This repository showcases projects in
 **Tools Used:** Power BI, Excel, DAX  
 **Screenshots:**  
 ![Refund Dashboard](Power_BI/Dashboard.jpg)  
-**Insights:** The dashboard highlights payments and refunds trends, top refund's causes, and percentaje of refund by payments.
+**Insights:** The dashboard highlights payments and refunds trends, top refund's causes, and percentage of refund by payments.
 
