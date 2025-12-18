@@ -1,0 +1,877 @@
+---
+title: 'Optimization project for energy consumption estimation methodology'
+author: "Aileen Venegas"
+date: "Last edition: `r format(Sys.Date(), '%d %B %Y') `"
+output:
+ html_document:
+    code_folding: hide
+    theme: paper
+    highlight: kate
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(here)
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(tidymodels)
+library(ggfortify)
+library(readxl)
+library(here)
+library(rlang)
+library(rsample)
+library(parsnip)
+library(yardstick)
+library(markdown)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(grid)
+library(forcats)
+library(plotly)
+library(foreach)
+library(doParallel)
+library(scatterplot3d)
+library(kknn)
+``` 
+
+
+# 1. Executive Summary
+
+This document presents a data-driven approach to optimizing the methodology for estimating an energy baseline (LBEn) and evaluating energy consumption performance in wastewater treatment plants. The analysis focuses on the application of data analysis and predictive modeling techniques in R to improve the accuracy, robustness, and scalability of energy consumption estimates.
+
+The study examines and compares different predictive approaches, including regression-based models and k-nearest neighbors, in order to identify the most appropriate method for forecasting electrical energy consumption. It also addresses key aspects such as data preprocessing, the definition of training and testing datasets, result visualization, and model performance evaluation.
+
+
+# 2. Data
+
+## 2.1. Data Source
+
+In the context of industrial process optimization, this project emphasizes the advantages of transitioning from manual, spreadsheet-based methodologies to reproducible and scalable analytical solutions developed in R. This shift enables more consistent performance monitoring and supports more reliable, data-informed decision-making, while preserving the confidentiality and anonymity of the underlying operational data. All datasets used in this project are anonymized and consist of randomly generated data based on realistic parameters and representative figures from industrial operations in Chile, ensuring methodological validity without disclosing sensitive or identifiable information.
+
+```{r load_data}
+#Load Data
+dataWW <- read_excel("dataWW.xlsx")
+View(dataWW)
+
+head(dataWW) # Visualizing the first rows of the dataset
+```
+
+## 3.1. Variables
+
+For practical purposes, the models are applied to a single treatment plant, which serves as an example and can later be replicated across the remaining plants. The production system used for demonstration purposes corresponds to the **Cadam wastewater treatment plant**.
+
+
+```{r save_cadam}
+cadam <- read_excel("dataWW.xlsx", sheet = "Cadam")
+head(cadam)
+```
+
+## 3.2. Data Conversion
+
+To facilitate the analysis, variable names are modified to a simpler syntax that ensures compatibility with the models applied in subsequent stages of the study.
+
+```{r column_name_conversion, echo=FALSE, results='hide'}
+cadam2 <- cadam  #duplicate table                  
+colnames(cadam2) <- gsub(" ", "", colnames(cadam2)) #replace characters in the duplicated table
+colnames(cadam2) <- gsub("T°", "t", colnames(cadam2))
+
+
+```
+## 3.3. Exploratory Analysis
+
+The target variable to be predicted is Energy (`kWh`), while the input variables considered for this specific case are treated water volume measured in cubic meters (`Volm3`), Dissolved Oxygen (`DO`), and Mixed Liquor Total Suspended Solids (`MLTSS`).
+
+For the variable `kWh`, the distribution is first visualized graphically by year.
+
+
+```{r, warning=FALSE, message=FALSE}
+kwh_year1 <- cadam2%>%filter(YEAR== "2021")
+kwh_year2 <- cadam2%>%filter(YEAR== "2022")
+kwh_year3 <- cadam2%>%filter(YEAR== "2023")
+
+cadam2 %>%
+  ggplot(aes(x = kWh, fill = as.factor(YEAR))) +
+  geom_density(alpha = 0.4) +
+  geom_vline(aes(xintercept = mean(kwh_year1$kWh)),
+             linetype = "dashed",
+             color = "#4575b4",
+             size = 1) +
+  geom_vline(aes(xintercept = mean(kwh_year2$kWh)),
+             linetype = "dashed",
+             color = "#91bfdb",
+             size = 1) +
+  geom_vline(aes(xintercept = mean(kwh_year3$kWh)),
+             linetype = "dashed",
+             color = "#313695",
+             size = 1) +
+  labs(x = "Electric energy consumption (kWh)",
+       y = "Density f(x)",
+       title = "Annual distribution of kWh") +
+  scale_fill_manual(values = c("2021" = "#4575b4", "2022" = "#91bfdb", "2023" = "#313695")) +  
+  theme_bw()
+```
+
+
+From the plot, it can be observed that for 2022 the distribution of the variable closely resembles a normal distribution, with the exception of left-side outliers. The vertical lines represent the mean values for the years. For 2021 and 2023 the data appear to be more dispersed to the sides.
+
+Nevertheless, in order to allow the models to learn from a larger number of observations, the kWh variable is analyzed without annual segmentation. Consequently, it is necessary to visualize its overall density distribution.
+
+
+```{r, warning=FALSE, message=FALSE}
+cadam2 %>% 
+  ggplot() +
+  geom_density(aes(x = kWh), size = 1, alpha = 0.3, fill = "steelblue") +
+  geom_vline(xintercept = mean(cadam2$kWh), linetype = "dashed", color = "darkblue", size = 1) +
+  labs(x = "Electric energy consumption (kWh)", y = "Density f(x)", title = "kWh distribution") + 
+  theme_bw()
+```
+The overall density of `kWh` approximates a normal distribution, although not perfectly. Additionally, as shown in the statistical summary presented in Section 3.2, the mean value is close to the median.
+
+The same exploratory analysis is then applied to the remaining two variables.
+
+```{r, warning=FALSE, message=FALSE}
+cadam2 %>% 
+  ggplot() +
+  geom_density(aes(x = Volm3), size = 1, alpha = 0.3, fill = "steelblue") +
+  geom_vline(xintercept = mean(cadam2$Volm3), linetype = "dashed", color = "darkblue", size = 1) +
+  labs(x = "Volume", y = "Densidad f(x)", title = "Distribution of VolASm3") + 
+  theme_bw()
+```
+
+```{r}
+cadam2 %>% 
+  ggplot() +
+  geom_density(aes(x = DO), size = 1, alpha = 0.3, fill = "steelblue") +
+  geom_vline(xintercept = mean(cadam2$DO), linetype = "dashed", color = "darkblue", size = 1) +
+  labs(x = "Dissolved Oxygen", y = "Density f(x)", title = "DO distribution") + 
+  theme_bw()
+```
+
+
+
+
+**KEY FINDINGS: As can be observed, variables that are directly related to chemical treatment processes do not exhibit density distributions that resemble a normal distribution. For this reason, linear regression models may not be the most appropriate approach.**
+
+
+# 4. Predictive Models
+
+## 4.1. Variable Selection for Predictive Models
+
+To identify the variables that contribute to predicting energy consumption in kWh, those variables were selected which, according to the literature and observations from wastewater treatment processes, are expected to have an impact on the dependent variable (`kWh`).
+
+## 4.3. Data Partitioning
+
+First, a random seed is set to ensure reproducibility, and the data are initially partitioned into 80% training and 20% testing sets. The resulting output illustrates how the data were split.
+
+```{r}
+set.seed(438) 
+splits <- initial_split(data = cadam2,  
+                              prop = 0.8) #Data partitioning using an 80% proportion
+splits #Visualize
+```
+
+For model analysis, 28 observations are used for training and 8 observations for testing. Due to the limited sample size, stratification is not applied; **however, it is recommended when working with larger datasets.**
+
+Subsequently, the training dataset is stored for later use.
+```{r}
+train <- training(splits) #Save training dataset for model fitting
+```
+
+At the same time, the evaluation dataset is stored for later use.
+```{r datos_evaluar}
+test <- testing(splits) # Save evaluation dataset
+```
+
+Next, 10 partitions are defined for the training data using 10-fold cross-validation. Stratification is attempted; however, a warning is generated due to the limited sample size. This limitation can be addressed when working with a larger volume of historical data. The output displays the defined partitions.
+```{r, echo=FALSE, results='hide'}
+set.seed(438)  #Same seed than before
+
+vfold <- vfold_cv(train, v = 10, strata = `kWh`) #Define partitions
+
+```
+
+## 4.4. Linear Regression Model
+
+In order to compare the current approach with the proposed methodology, multiple linear regression models are first implemented. The model specification is created using the `linear_reg()` function from the **parsnip** package. The output displays the linear model specification, which is subsequently used to fit and evaluate the linear regression model.
+```{r}
+#Define the model specification
+
+lm_spec <- linear_reg() %>%
+  set_mode("regression") %>% 
+  set_engine("lm")
+
+
+```
+
+### 4.4.1. Using Two Variables
+
+Fit a linear regression model for electrical energy consumption (`kWh`) as a function of official treated water volume (`Volm3`) and dissolved oxygen (`OD`) using the training data.
+
+```{r}
+#Fit the linear regression mode
+lm_fit <- lm_spec %>%  
+  #Functional form y = f(x) = b_0+b_1*X
+  fit(`kWh` ~ `Volm3`+`DO`, data = train) %>% ## Load training dataset
+  step_normalize(c(`Volm3`,`DO`))
+
+lm_fit 
+```
+
+**Functional form:**
+
+$$\text{Electrical energy (kWh)} = \beta_0 + \beta_1 \cdot \text{Treated water volume} + \beta_2 \cdot \text{Dissolved oxygen}$$
+
+$$\text{Electrical energy (kWh)} = 741800 + 0.02161 \cdot \text{Volm3} - 6186 \times 10^{3} \cdot \text{DO}$$
+To visualize a statistical summary of the fitted linear regression model, including coefficients, standard errors, t-values, and p-values, you should use:
+```{r}
+#View summary results
+lm_fit %>% pluck("fit")  %>%
+  summary()
+```
+Then, the model results are converted into a tibble for a cleaner and more structured visualization.
+```{r}
+#View summary results as a tibble
+yardstick::tidy(lm_fit)
+```
+
+This way, the model predictions can be visualized on the training dataset.
+```{r}
+#View predictions as a tibble
+predict(lm_fit, new_data = train)
+```
+Next, the fitted values (predictions) are calculated and displayed, and then joined with the original dataset, including the input variables (VolASm3 and OD) and the actual value of the dependent variable (kWh).
+```{r}
+# Obtain fitted values (predictions): estimated kWh and join with dataset
+fitted_values <- dplyr::bind_cols(
+  predict(lm_fit, new_data = train),
+  train
+) %>% 
+  # Select columns of interest
+  select(.actual = `kWh`, # Actual value (y)
+         .pred,          # Prediction (estimated y)
+         `Volm3`,`DO`) # Input variables (x)
+
+
+```
+
+A 3D plot is presented now, comparing the actual values with the model predictions as a function of two input variables ´Volm3´ y ´DO´.
+
+```{r, fig.width=10, fig.height=7}
+scatter_3d1 <- scatterplot3d(
+  x = fitted_values$Volm3,
+  y = fitted_values$DO,
+  z = fitted_values$.actual,
+  color = "steelblue",
+  pch = 16,
+  main = "3D Linear Regression Plot 1: Actual vs. Prediction",
+  xlab = "Official volume (m3)",  
+  ylab = "Dissolved oxygen",     
+  zlab = "Electric energy (kWh)"  
+)
+
+# Add predictions to the plot
+scatter_3d1$points3d(
+  x = fitted_values$Volm3,
+  y = fitted_values$DO,
+  z = fitted_values$.pred,
+  col = "darkblue",
+  pch = 16
+)
+```
+
+Finally, to obtain performance metrics, residuals are calculated by subtracting the model predictions.
+```{r}
+# Obtain residual values
+fitted_values1<- fitted_values%>% 
+  mutate(.residual = .actual - .pred) # Actual - Prediction
+
+
+```
+
+For a more visual result of the residuals, a residual scatter plot is created using ggplot2. The x-axis shows the fitted values for electric energy ´kWh´ and the y-axis represents the residuals.
+```{r}
+fitted_values1 %>% 
+ggplot2::ggplot(aes(x = .pred, y = .residual)) +
+  geom_point(alpha = 0.8, size = 2) +
+  labs(
+    x = "Fitted values for Electric Energy (kWh)",
+    y = "Residuals"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed")
+```
+
+- Performance metrics
+```{r}
+# MAE
+fitted_values1 %>%
+  mae(truth=.actual, estimate=.pred)
+
+# RMSE
+fitted_values1 %>%
+  rmse(truth=.actual, estimate=.pred)
+
+# R^2
+fitted_values1 %>%
+  rsq(truth=.actual, estimate=.pred)
+```
+
+**Interpretation**
+
+
+RMSE: The best result is when, on average, the model in training fails by 45004 kWh when predicting..
+
+MAE: The best result is when, in absolute terms, the model in training fails by 37543.72 kWh when predicting.
+
+RSQ: The input variables explain 5.3% of the variance.
+
+
+```{r}
+#Fit the linear regression
+lm_fit_test <- lm_spec %>% 
+  fit(`kWh` ~ `Volm3`+`DO`, data = test) %>% #Load the training dataset
+  step_normalize(c(`Volm3`,`DO`))
+
+lm_fit_test
+```
+
+
+**Functional form:**
+
+$$\text{Electrical energy (kWh)}=  857900 +\ 0.01534 \cdot \text{Volm3}-\ 73310 \cdot\text{DO}$$
+To validate the model’s performance, the linear regression model (lm_spec) should be fitted using the test data (test).
+
+```{r}
+#View summary results as a tibble
+yardstick::tidy(lm_fit_test)
+```
+```{r}
+#View predictions as a tibble
+predict(lm_fit_test, new_data = test)
+```
+
+```{r}
+#Obtain fitted values (predictions): estimated kWh and join with dataset
+fitted_values_test <- dplyr::bind_cols(
+  predict(lm_fit_test, new_data = test),
+  test
+) %>% 
+  #Select columns of interest
+  select(.actual = `kWh`, #Actual value (y)
+         .pred, #Prediction (estimated)
+         `Volm3`,`DO`) #Input variables (x)
+
+
+```
+
+```{r}
+#Obtain residual values
+fitted_values2 <- fitted_values_test %>% 
+  mutate(.residual = .actual - .pred) #Actual - Prediction
+
+
+```
+
+- Performance metrics on the test set
+
+```{r}
+#MAE
+fitted_values2 %>%
+  mae(truth=.actual, estimate=.pred)
+
+#RMSE
+fitted_values2 %>%
+  rmse(truth=.actual, estimate=.pred)
+
+#R^2
+fitted_values2 %>%
+  rsq(truth=.actual, estimate=.pred)
+```
+
+**Interpretation**
+
+
+RMSE: The best result is when, on average, the model in evaluation fails by 56505.41 kWh when predicting.
+
+MAE: The best result is when, in absolute terms, the model in evaluation fails by 47733.76 kWh when predicting.
+
+RSQ: The input variables explain 30.41% of the variance.
+
+**Finding:**
+The metrics for the test set are almost double those of the training set for RMSE and MAE, while R² is significantly higher in the test set. Therefore, the model is not sufficiently stable.
+
+
+### 4.4.2. With Three Variables
+
+Fit a linear regression model of `kWh` as a function of `Volm3`, `DO`, and `MLTSS` using the training data. 
+```{r, echo=FALSE, results='hide'}
+
+lm_fit3 <- linear_reg(penalty = 2, mixture = 1) %>% 
+  fit(`kWh` ~ `Volm3`+`DO`+`MLTSS`, data = train) %>% 
+  step_normalize(c(`Volm3`,`DO`,`MLTSS`))
+
+lm_fit3
+```
+```{r, echo=FALSE, results='hide'}
+lm_fit3 %>% pluck("fit")  %>%
+  summary()
+```
+
+
+**Functional form:**
+
+$$\text{Electrical energy (kWh)}=\beta_0+\beta_1\cdot\text{Treated water volume}+\beta_2\cdot\text{Dissolved oxygen}\\+\beta_3\cdot\text{Mixed Liquor Total Suspended Solids}$$
+$$\text{Electrical energy (kWh)}=\  814900+\ 0.01996 \cdot\text{Treated water volume}−2,588\cdot\text{Dissolved oxygen}\\−31.69\cdot\text{Mixed Liquor Total Suspended Solids}$$
+
+```{r, echo=FALSE, results='hide'}
+#View summary results as a tibble
+yardstick::tidy(lm_fit3)
+```
+```{r,echo=FALSE, results='hide'}
+#View predictions as a tibble
+predict(lm_fit3, new_data = train)
+```
+
+```{r, echo=FALSE, results='hide'}
+#Obtain fitted values (predictions): estimated kWh and join with dataset
+fitted_values3 <- dplyr::bind_cols(
+  predict(lm_fit3, new_data = train),
+  train
+) %>% 
+  #Select columns of interest
+  select(.actual = `kWh`, #Actual value (y)
+         .pred, #Prediction (estimated)
+        `Volm3`,`DO`,`MLTSS`) #Input variables (x)
+
+```
+
+
+```{r}
+#Obtain residual values
+fitted_values3 <- fitted_values3 %>% 
+  mutate(.residual = .actual - .pred) # Actual - Prediction
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+fitted_values3 %>% 
+ggplot2::ggplot(aes(x = .pred, y = .residual)) +
+  geom_point(alpha = 0.8, size = 2) +
+  labs(
+    x = "Fitted values for Electric Energy (kWh)",
+    y = "Residuals"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed")
+```
+
+- Performance metrics
+```{r}
+#MAE
+fitted_values3 %>%
+  mae(truth=.actual, estimate=.pred)
+
+#RMSE
+fitted_values3 %>%
+  rmse(truth=.actual, estimate=.pred)
+
+#R^2
+fitted_values3 %>%
+  rsq(truth=.actual, estimate=.pred)
+```
+
+**Interpretation**
+
+
+RMSE: On average, the training model fails by 42522.57 kWh when predicting.
+
+MAE: In absolute terms, the model fails by 34951.19	 kWh when predicting.
+
+RSQ: Input variables explain 15.52% of the variance.
+
+In training, the three-variable model performs worse than the two-variable model.
+
+```{r}
+#Fit linear regression on test data
+lm_fit_test3 <-linear_reg(penalty = 1, mixture = 1) %>% 
+  fit(`kWh` ~ `Volm3`+`DO`+`MLTSS`, data = test) %>% # Load test dataset
+  step_normalize(c(`Volm3`,`DO`,`MLTSS`))
+
+lm_fit_test3
+```
+
+
+**Forma funcional:**
+
+$$\text{Electrical energy (kWh)}= 1,141,000+0.03618\cdot\text{Treated water volume}−69,100\cdot\text{Dissolved oxygen}\\−130.9\cdot\text{Mixed Liquor Total Suspended Solids}$$
+
+```{r, echo=FALSE, results='hide'}
+#View summary results as a tibble
+yardstick::tidy(lm_fit_test3)
+```
+```{r, echo=FALSE, results='hide'}
+#View predictions as a tibble
+predict(lm_fit_test3, new_data = test)
+```
+
+```{r, echo=FALSE, results='hide'}
+#Obtain fitted values (predictions): estimated kWh and join with dataset
+fitted_values_test3 <- dplyr::bind_cols(
+  predict(lm_fit_test3, new_data = test),
+  test
+) %>% 
+  #Select columns of interest
+  select(.actual = `kWh`, # Actual value (y)
+         .pred, # Prediction (estimated)
+         `Volm3`,`DO`,`MLTSS`) # Input variables (x)
+
+```
+
+```{r, echo=FALSE, results='hide'}
+#Obtain residual values
+fitted_values33 <- fitted_values_test3 %>% 
+  mutate(.residual = .actual - .pred) #Actual - Prediction
+
+```
+
+- Performance metrics on test set
+
+```{r}
+#MAE
+fitted_values33 %>%
+  mae(truth=.actual, estimate=.pred)
+
+#RMSE
+fitted_values33 %>%
+  rmse(truth=.actual, estimate=.pred)
+
+#R^2
+fitted_values33 %>%
+  rsq(truth=.actual, estimate=.pred)
+```
+
+**Interpretation**
+
+RMSE: On average, the evaluation model fails by 30130.96 kWh when predicting.
+
+MAE: In absolute terms, the model fails by 26132.64 kWh when predicting.
+
+RSQ: Input variables explain 80.21% of the variance.
+
+**Findings**: Comparing training and test results for the three-variable linear regression model, performance is better on the test data. **This indicates overfitting when using linear regressions.**
+
+
+
+## 4.5. k-Nearest Neighbors
+
+The second methodology used is k-nearest neighbors (k-NN). This method predicts the value of a new data point based on the k closest historical points according to Euclidean distance.
+
+Step by step:
+
+- First, specify how the model will be fitted using a recipe:
+
+```{r, echo=FALSE, results='hide'}
+set.seed(483)
+receta <- recipe(`kWh` ~ `Volm3`+`DO`, data = train)%>% ## Specify input and output variables
+  step_scale(all_predictors())%>% #Scale with mean and standard deviation
+  step_center(all_predictors()) #Center variables
+
+```
+
+- Next, define the type of model to be used (k-NN):
+
+```{r, echo=FALSE, results='hide'}
+knn_spec <-nearest_neighbor(    #especificar tipo de modelo
+  weight_func = "rectangular",  # Use Euclidean distance
+  neighbors = tune()  #Allow tuning the number of neighbors
+)%>%
+  set_engine("kknn")%>% 
+  set_mode("regression") #Regression problem
+```
+
+- Split the data into ten folds for cross-validation:
+
+```{r, echo=FALSE, results='hide'}
+knn_vfold <- vfold_cv(train, v =10)
+```
+
+- Set up the workflow:
+```{r, echo=FALSE, results='hide'}
+wrkflw <-workflow()%>%
+  add_recipe(receta)%>% #Specify predictor and response variables
+  add_model(knn_spec) #Specify the type of model to use
+```
+
+- Create a grid for the number of neighbors (100 models with different k):
+```{r, echo=FALSE, results='hide'}
+knn_grid <- tibble(neighbors=seq(from =1, to= 10, by =1))
+```
+
+- Perform cross-validation to find the best model:
+```{r, echo=FALSE, results='hide'}
+knn_results<- wrkflw%>%
+  tune_grid(
+    resample =knn_vfold, #Perform 10-fold cross-validation
+    grid= knn_grid #Define the grid of parameters to evaluate 
+  )
+
+```
+- Visualize RMSE for each neighbor count:
+```{r, echo=FALSE, results='hide'}
+knn_result<- knn_results%>%
+  collect_metrics()%>%
+  filter(.metric=="rmse") #Other metrics can be used, e.g., R², to assess model fit
+
+```
+
+- For a more visual result, the mean squared error can be plotted for each neighbor used in the cross-validation. The lowest points on the plot indicate the best model performance, that is, the optimal number of neighbors to use.
+```{r, warning=FALSE, message=FALSE}
+knn_result%>%
+  ggplot(aes(x=neighbors, y=mean)) +
+  geom_point()+
+  geom_line()+
+  labs(
+    x="Neighbors (k)",
+    y= "RMSE"
+  )
+```
+- Then, the lowest point on the plot should be obtained using:
+```{r}
+knn_result %>%
+  filter(mean == min(knn_result$mean[!is.na(knn_result$mean)]))
+
+```
+```{r}
+knn_min <- knn_result%>% 
+  filter(mean == min(knn_result$mean[!is.na(knn_result$mean)]))%>% 
+  pull(neighbors)
+
+```
+
+- Now, it is necessary to evaluate the model on the test data. For this, the optimal number of neighbors found must be specified. Afterwards, the previous code is reused with the relevant modifications.
+
+```{r}
+knn_spec_best<-nearest_neighbor(
+  weight_func = "rectangular",
+  neighbors = knn_min
+)%>%
+  set_engine("kknn")%>%
+  set_mode("regression")
+```
+
+```{r}
+wrkflw_best<-workflow()%>%
+  add_recipe(receta)%>% 
+  add_model(knn_spec_best) 
+```
+
+```{r}
+knn_fit_best<- wrkflw_best%>%
+  fit(data=train)
+```
+
+```{r}
+knn_train_pred_best<- knn_fit_best%>%
+  predict(train)%>%
+  bind_cols(train)
+```
+
+```{r}
+knn_test_pred_best<- knn_fit_best%>%
+  predict(test)%>%
+  bind_cols(test)
+```
+
+```{r}
+knn_test_pred_best%>%
+  metrics(truth = kWh, estimate = .pred)%>%
+  filter(.metric=="rmse")
+```
+
+** Finding**: The model on the test data shows a higher RMSE than on the training data, which indicates the absence of overfitting and confirms the model's functionality.
+
+To visualize the fitted prediction curve created by the model, a 3D plot representation will be used.
+
+```{r, fig.width=10, fig.height=5}
+x_values<- seq(from =min(train$Volm3, na.rm = TRUE),
+                to=max(train$Volm3, na.rm = TRUE), length=32)
+  
+y_values<- seq(from =min(train$DO, na.rm = TRUE),
+                to=max(train$DO, na.rm = TRUE), length=32)
+  
+z_values<-knn_fit_best%>%
+  predict(crossing(x_values, y_values)%>%
+            mutate(Volm3= x_values, DO=y_values))%>%
+  pull(.pred)
+
+z_matrix <- matrix(z_values, ncol = length(y_values), byrow = TRUE)
+
+plot_3d <- plot_ly() %>%
+  add_markers(
+    data = train %>% filter(!is.na(DO)),
+    x = ~Volm3,
+    y = ~DO,
+    z = ~kWh,
+    marker = list(size = 2, opacity = 0.4, color = "red")
+  ) %>%
+  add_surface(
+    x = ~x_values,
+    y = ~y_values,
+    z = ~matrix(z_values, nrow = length(x_values), ncol = length(y_values)),
+    colorbar = list(title = "Electrical energy (kWh)")
+  ) %>%
+  layout(scene = list(
+    xaxis = list(title = "Treated water volume"),
+    zaxis = list(title = "Electrical energy (kWh)"),
+    yaxis = list(title = "Dissolved oxygen")
+  ))
+
+
+
+plot_3d
+```
+
+## 4.6. Decision Tree
+
+Just like with k-nearest neighbors, there are other methodologies for making predictions in regression problems, one of which is decision trees.
+
+For this methodology, the same variables as before will also be used.
+```{r}
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+  ) %>%
+  #Considering that all variables are numeric, a regression model is used.
+  set_mode("regression") %>%
+  set_engine("rpart")
+
+```
+
+```{r}
+tree_grilla <- grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  min_n(),
+  levels = 6) #Four levels were used, as it is the most suitable given the computational capacity in which the model is being executed
+
+```
+
+```{r}
+recipe_carreras <- recipe(`kWh` ~ `Volm3`+`DO`+`MLTSS`,data = train) %>%  #Define input and output variables 
+  step_normalize(c(`Volm3`,`DO`)) #Normalize all numeric variables, since they have different scales
+
+  
+```
+
+```{r, warning=FALSE,  message=FALSE}
+doParallel::registerDoParallel() #Ensure that the models run in parallel
+
+regression_metrics <- metric_set(rmse,mae) #Define performance metrics
+
+set.seed(438)
+
+tree_result <- tree_spec%>%
+  tune_grid(
+    preprocessor = recipe_carreras, #Preprocessing
+    resamples = vfold, #Partitions
+    grid = tree_grilla, #Decision tree grid
+    metrics = regression_metrics, #Performance metrics
+    control = control_resamples(verbose = TRUE, save_pred = TRUE) # Storage
+  )
+
+```
+
+```{r}
+#Best result for each metric
+show_best(tree_result, metric = 'rmse')
+show_best(tree_result, metric = 'mae')
+```
+**Interpretation**
+
+RMSE: The best result occurs when, on average, the model on the training data fails by 50527.65 kWh in predicting energy consumption.
+
+MAE: The best result occurs when, in absolute terms, the model on the training data fails by 44247.79 kWh in predicting energy consumption.
+
+```{r}
+#Fit decision tree on training data
+tree_train <- tree_spec %>% 
+  finalize_model(select_best(tree_result, metric ="rmse")) %>% #Set metric to "RMSE"
+  fit(`kWh` ~ `Volm3`+`DO`, data = train)
+
+```
+
+```{r}
+#Fit decision tree on evaluation data
+tree_test <- tree_spec %>% 
+  finalize_model(select_best(tree_result, metric = "rmse")) %>% #Set metric to "RMSE"
+  fit(`kWh` ~ `Volm3`+`DO`+`MLTSS`, data = test)
+
+```
+
+```{r}
+#Prediction on training data
+pred_tree_train <- tree_train %>% 
+  predict(train) %>% 
+  bind_cols(train)
+
+#Prediction on evaluation data
+pred_tree_test <- tree_test %>% 
+  predict(test) %>% 
+  bind_cols(test)
+```
+
+```{r}
+#Decision tree performance on training data
+pred_tree_train %>% 
+ regression_metrics(truth = `kWh`, estimate = .pred)
+
+#Decision tree performance on evaluation data
+pred_tree_test %>% 
+  regression_metrics(truth = `kWh`, estimate = .pred)
+```
+**Findings**
+The model performed slightly better during cross-validation than on the test set, as indicated by lower RMSE and MAE values in the evaluation phase. This may suggest a minor overfitting to the training folds or natural differences between the evaluation and test data. However, the difference is small, indicating that the model remains reliable for making predictions.
+
+```{r, fig.width=10, fig.height=5,warning=FALSE, message=FALSE}
+autoplot(tree_result)
+
+```
+
+
+**Findings**: 
+
+Cost-Complexity Parameter (α):
+
+- Increasing α simplifies the tree by penalizing complexity.
+- In trees with very small minimum node size, a moderate increase in α slightly reduces error by pruning over-complex branches.
+- For larger minimum node sizes, α has little effect since the tree is already constrained.
+
+Tree Depth:
+
+- Shallow trees (depth 1) tend to underfit, resulting in high error.
+- Medium-depth trees (depth 3–6) provide a good balance between accuracy and generalization.
+- Very deep trees (depth 12–15) achieve the lowest error at small α, but pruning may be required to avoid overfitting.
+
+Minimal Node Size (min_n):
+
+- Increasing minimum node size restricts splitting, slightly increasing error but improving generalization.
+- Smaller minimum node sizes allow deeper splits, lowering error on training/evaluation data but increasing overfitting risk.
+
+Summary:
+
+- Optimal performance is achieved by balancing α, tree depth, and minimum node size.
+- Low α with deep trees and small node sizes minimizes training error but may overfit.
+- Adjusting α and min_n allows control of model complexity and improves generalization to new data.
