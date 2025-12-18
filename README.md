@@ -9,7 +9,7 @@ All datasets used are generic, fictional, or anonymized and were adapted specifi
 
 ## Projects
 
-### Power BI – Refunds Dashboard
+### [Power BI – Refunds Dashboard](https://github.com/aileenvenegas/Portfolio/tree/main/Power_BI)
 **Description:**  
 Interactive dashboard built as a portfolio mockup, inspired by a real business use case.
 
@@ -27,7 +27,7 @@ The dashboard highlights refund trends over time, main refund causes, and the re
 
 ---
 
-### R & R Markdown – Energy Consumption Estimation
+### [R & R Markdown – Energy Consumption Estimation](https://github.com/aileenvenegas/Portfolio/tree/main/R)
 **Description:**  
 Data analysis project focused on improving the estimation of electrical energy consumption in a wastewater treatment plant.
 
