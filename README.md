@@ -49,7 +49,7 @@ Data analysis project focused on improving the estimation of electrical energy c
 
 ![k-Nearest Neighbors](R/DTR.jpg)
 
-**Tools:** [R](https://github.com/aileenvenegas/Portfolio/blob/main/R/Wastewater%20project.Rmd), R Studio, [R Markdown] (https://github.com/aileenvenegas/Portfolio/blob/main/R/Wastewater-project.html), tidyverse, tidymodels  
+**Tools:** [R](https://github.com/aileenvenegas/Portfolio/blob/main/R/Wastewater%20project.Rmd), R Studio, [R Markdown](https://github.com/aileenvenegas/Portfolio/blob/main/R/Wastewater-project.html), tidyverse, tidymodels  
 
 This project emphasizes model comparison, generalization performance, and interpretability rather than maximizing predictive accuracy.
 
