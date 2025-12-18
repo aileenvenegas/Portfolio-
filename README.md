@@ -37,9 +37,17 @@ Data analysis project focused on improving the estimation of electrical energy c
 - Reproducible analysis using R Markdown  
 
 **Models used:**  
-- Linear Regression  
-- k-Nearest Neighbors  
-- Decision Tree Regression  
+- Linear Regression
+
+![Linear Regression](R/LR.jpg)
+
+- k-Nearest Neighbors
+  
+![k-Nearest Neighbors](R/KKNN.jpg)
+  
+- Decision Tree Regression
+
+![k-Nearest Neighbors](R/DTR.jpg)
 
 **Tools:** R, R Studio, R Markdown, tidyverse, tidymodels  
 
