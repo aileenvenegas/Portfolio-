@@ -50,6 +50,7 @@ Multi-page interactive dashboard developed as a portfolio project, based on a re
 **Insights:**  
 The report provides a consolidated view of the credit, including credit status distribution, outstanding balances, risk segmentation, and temporal trends across multiple report pages.
 
+---
 ### [R & R Markdown – Energy Consumption Estimation](https://github.com/aileenvenegas/Portfolio/tree/main/R)
 **Description:**  
 Data analysis project focused on improving the estimation of electrical energy consumption in a wastewater treatment plant.
